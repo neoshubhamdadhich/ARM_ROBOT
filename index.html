@@ -80,6 +80,23 @@ if(cmd=="save"){
 }
 
 window.onload=init;
+  let ws;
+
+function init(){
+
+  // 🔥 Read IP from URL
+  const params = new URLSearchParams(window.location.search);
+  const ip = params.get("ip");
+
+  if(ip){
+    ws = new WebSocket("ws://" + ip + "/ws");
+    console.log("Connecting to:", ip);
+  }else{
+    alert("ESP IP not found!");
+  }
+}
+
+window.onload = init;
 </script>
 
 </body>
