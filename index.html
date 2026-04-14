@@ -1,102 +1,171 @@
-<!DOCTYPE html><html>
+<!DOCTYPE html>
+<html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot Arm Control</title>
+
 <style>
-body{font-family:sans-serif;text-align:center;background:#f4f4f9;padding:20px;}
-.container{max-width:400px;margin:auto;background:white;padding:20px;border-radius:15px;}
-.slider-row{margin:15px 0;}
-button{margin:10px;padding:10px 20px;border:none;border-radius:8px;background:#3498db;color:white;}
+body{
+  font-family:sans-serif;
+  text-align:center;
+  background:#f4f4f9;
+  padding:20px;
+}
+.container{
+  max-width:400px;
+  margin:auto;
+  background:white;
+  padding:20px;
+  border-radius:15px;
+}
+.slider-row{
+  margin:15px 0;
+}
+input[type="range"]{
+  width:100%;
+}
+button{
+  margin:5px;
+  padding:8px 15px;
+  border:none;
+  border-radius:8px;
+  background:#3498db;
+  color:white;
+}
+#status{
+  margin:10px;
+  font-weight:bold;
+}
 </style>
 </head>
+
 <body>
 
 <div class="container">
+
 <h2>Robot Arm</h2>
 
+<!-- STATUS -->
+<div id="status">Disconnected</div>
+
+<!-- IP INPUT -->
+<div class="slider-row">
+ESP IP:
+<input type="text" id="ipInput" placeholder="192.168.x.x">
+<button onclick="connectWS()">Connect</button>
+</div>
+
+<!-- SERVOS -->
 <div id="controls"></div>
 
+<!-- SPEED -->
 <div class="slider-row">
 Speed: <span id="vs">30</span>
 <input type="range" id="speed" min="0" max="60" value="30" oninput="sendSpeed(this)">
 </div>
 
-<div>
-<button onclick="sendCmd('save')">SAVE</button>
-<button onclick="sendCmd('run')">RUN</button>
-<button onclick="sendCmd('reset')">RESET</button>
-</div>
-
 </div>
 
 <script>
-let c=document.getElementById("controls");
+
+let ws;
+let lastCmd = "";
+let reconnectTimer;
+
+// ===== CREATE SLIDERS =====
+let c = document.getElementById("controls");
 
 for(let i=1;i<=6;i++){
-c.innerHTML+=`
+c.innerHTML += `
 <div class="slider-row">
 S${i}: <span id="v${i}">0</span>
 <input type="range" id="S${i}" min="0" max="180" value="0" oninput="sendVal(this)">
 </div>`;
 }
 
-let ws;
-let lastCmd="";
-
-// init
-function init(){
-ws = new WebSocket("ws://192.168.1.100/ws");
-}
-
-// servo send
-function sendVal(el){
-let val=el.value;
-document.getElementById("v"+el.id[1]).innerText=val;
-
-let cmd = el.id.toLowerCase()+val.toString().padStart(3,'0');
-lastCmd = cmd;
-
-if(ws.readyState===WebSocket.OPEN){
-ws.send(cmd);
-}
-}
-
-// speed
-function sendSpeed(el){
-let val=el.value;
-document.getElementById("vs").innerText=val;
-
-if(ws.readyState===WebSocket.OPEN){
-ws.send("spd"+val.toString().padStart(3,'0'));
-}
-}
-
-// buttons
-function sendCmd(cmd){
-if(cmd=="save"){
-  ws.send("save:"+lastCmd);
-}else{
-  ws.send(cmd);
-}
-}
-
-window.onload=init;
-  let ws;
-
+// ===== INIT =====
 function init(){
 
-  // 🔥 Read IP from URL
+  // 1. Get IP from URL
   const params = new URLSearchParams(window.location.search);
-  const ip = params.get("ip");
+  let ip = params.get("ip");
 
+  // 2. If not, get saved IP
+  if(!ip){
+    ip = localStorage.getItem("esp_ip");
+  }
+
+  // 3. Auto-fill + connect
   if(ip){
-    ws = new WebSocket("ws://" + ip + "/ws");
-    console.log("Connecting to:", ip);
-  }else{
-    alert("ESP IP not found!");
+    document.getElementById("ipInput").value = ip;
+    connectWS();
   }
 }
 
+// ===== CONNECT =====
+function connectWS(){
+
+  let ip = document.getElementById("ipInput").value;
+
+  if(!ip){
+    alert("Enter ESP IP");
+    return;
+  }
+
+  // Save IP
+  localStorage.setItem("esp_ip", ip);
+
+  // Close old
+  if(ws){
+    ws.close();
+  }
+
+  ws = new WebSocket("ws://" + ip + "/ws");
+
+  ws.onopen = ()=>{
+    document.getElementById("status").innerText = "Connected";
+    document.getElementById("status").style.color = "green";
+    console.log("Connected to", ip);
+  };
+
+  ws.onclose = ()=>{
+    document.getElementById("status").innerText = "Disconnected";
+    document.getElementById("status").style.color = "red";
+
+    // Auto reconnect
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connectWS, 2000);
+  };
+}
+
+// ===== SEND SERVO =====
+function sendVal(el){
+
+  let val = el.value;
+  document.getElementById("v"+el.id[1]).innerText = val;
+
+  let cmd = el.id.toLowerCase() + val.toString().padStart(3,'0');
+  lastCmd = cmd;
+
+  if(ws && ws.readyState === WebSocket.OPEN){
+    ws.send(cmd);
+  }
+}
+
+// ===== SEND SPEED =====
+function sendSpeed(el){
+
+  let val = el.value;
+  document.getElementById("vs").innerText = val;
+
+  if(ws && ws.readyState === WebSocket.OPEN){
+    ws.send("spd" + val.toString().padStart(3,'0'));
+  }
+}
+
+// ===== START =====
 window.onload = init;
+
 </script>
 
 </body>
