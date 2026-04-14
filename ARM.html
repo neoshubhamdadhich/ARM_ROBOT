@@ -1,0 +1,86 @@
+<!DOCTYPE html><html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font-family:sans-serif;text-align:center;background:#f4f4f9;padding:20px;}
+.container{max-width:400px;margin:auto;background:white;padding:20px;border-radius:15px;}
+.slider-row{margin:15px 0;}
+button{margin:10px;padding:10px 20px;border:none;border-radius:8px;background:#3498db;color:white;}
+</style>
+</head>
+<body>
+
+<div class="container">
+<h2>Robot Arm</h2>
+
+<div id="controls"></div>
+
+<div class="slider-row">
+Speed: <span id="vs">30</span>
+<input type="range" id="speed" min="0" max="60" value="30" oninput="sendSpeed(this)">
+</div>
+
+<div>
+<button onclick="sendCmd('save')">SAVE</button>
+<button onclick="sendCmd('run')">RUN</button>
+<button onclick="sendCmd('reset')">RESET</button>
+</div>
+
+</div>
+
+<script>
+let c=document.getElementById("controls");
+
+for(let i=1;i<=6;i++){
+c.innerHTML+=`
+<div class="slider-row">
+S${i}: <span id="v${i}">0</span>
+<input type="range" id="S${i}" min="0" max="180" value="0" oninput="sendVal(this)">
+</div>`;
+}
+
+let ws;
+let lastCmd="";
+
+// init
+function init(){
+ws=new WebSocket(`ws://${location.hostname}/ws`);
+}
+
+// servo send
+function sendVal(el){
+let val=el.value;
+document.getElementById("v"+el.id[1]).innerText=val;
+
+let cmd = el.id.toLowerCase()+val.toString().padStart(3,'0');
+lastCmd = cmd;
+
+if(ws.readyState===WebSocket.OPEN){
+ws.send(cmd);
+}
+}
+
+// speed
+function sendSpeed(el){
+let val=el.value;
+document.getElementById("vs").innerText=val;
+
+if(ws.readyState===WebSocket.OPEN){
+ws.send("spd"+val.toString().padStart(3,'0'));
+}
+}
+
+// buttons
+function sendCmd(cmd){
+if(cmd=="save"){
+  ws.send("save:"+lastCmd);
+}else{
+  ws.send(cmd);
+}
+}
+
+window.onload=init;
+</script>
+
+</body>
+</html>
