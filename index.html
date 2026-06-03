@@ -1,171 +1,131 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Robot Arm Control</title>
-
-<style>
-body{
-  font-family:sans-serif;
-  text-align:center;
-  background:#f4f4f9;
-  padding:20px;
-}
-.container{
-  max-width:400px;
-  margin:auto;
-  background:white;
-  padding:20px;
-  border-radius:15px;
-}
-.slider-row{
-  margin:15px 0;
-}
-input[type="range"]{
-  width:100%;
-}
-button{
-  margin:5px;
-  padding:8px 15px;
-  border:none;
-  border-radius:8px;
-  background:#3498db;
-  color:white;
-}
-#status{
-  margin:10px;
-  font-weight:bold;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 BLE ADC Monitor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f6f9;
+            color: #333;
+            text-align: center;
+            padding: 50px 20px;
+        }
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+        }
+        .status {
+            margin-top: 15px;
+            font-weight: bold;
+            color: #666;
+        }
+        .display-box {
+            font-size: 48px;
+            font-weight: bold;
+            color: #28a745;
+            margin: 30px 0;
+        }
+    </style>
 </head>
-
 <body>
 
 <div class="container">
-
-<h2>Robot Arm</h2>
-
-<!-- STATUS -->
-<div id="status">Disconnected</div>
-
-<!-- IP INPUT -->
-<div class="slider-row">
-ESP IP:
-<input type="text" id="ipInput" placeholder="192.168.x.x">
-<button onclick="connectWS()">Connect</button>
-</div>
-
-<!-- SERVOS -->
-<div id="controls"></div>
-
-<!-- SPEED -->
-<div class="slider-row">
-Speed: <span id="vs">30</span>
-<input type="range" id="speed" min="0" max="60" value="30" oninput="sendSpeed(this)">
-</div>
-
+    <h2>ESP32 ADC Monitor</h2>
+    <p>GPIO 34 Real-time Data via BLE</p>
+    
+    <div class="display-box" id="adcValue">0000</div>
+    
+    <button id="connectBtn" onclick="connectBLE()">Connect to ESP32</button>
+    <div class="status" id="statusText">Status: Disconnected</div>
 </div>
 
 <script>
+    // Must match the UUIDs in your Arduino code
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    const CHARACTERISTIC_UUID_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
-let ws;
-let lastCmd = "";
-let reconnectTimer;
+    let bleDevice = null;
+    let gattServer = null;
 
-// ===== CREATE SLIDERS =====
-let c = document.getElementById("controls");
+    async function connectBLE() {
+        const statusText = document.getElementById('statusText');
+        const connectBtn = document.getElementById('connectBtn');
+        const adcValueDisplay = document.getElementById('adcValue');
 
-for(let i=1;i<=6;i++){
-c.innerHTML += `
-<div class="slider-row">
-S${i}: <span id="v${i}">0</span>
-<input type="range" id="S${i}" min="0" max="180" value="0" oninput="sendVal(this)">
-</div>`;
-}
+        try {
+            statusText.textContent = "Status: Searching...";
+            
+            // Request standard Bluetooth device filtering for our custom service
+            bleDevice = await navigator.bluetooth.requestDevice({
+                filters: [{ name: 'ESP32_ADC_BLE' }],
+                optionalServices: [SERVICE_UUID]
+            });
 
-// ===== INIT =====
-function init(){
+            statusText.textContent = "Status: Connecting...";
+            bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
 
-  // 1. Get IP from URL
-  const params = new URLSearchParams(window.location.search);
-  let ip = params.get("ip");
+            // Connect to GATT Server
+            gattServer = await bleDevice.gatt.connect();
 
-  // 2. If not, get saved IP
-  if(!ip){
-    ip = localStorage.getItem("esp_ip");
-  }
+            // Get Service
+            const service = await gattServer.getPrimaryService(SERVICE_UUID);
 
-  // 3. Auto-fill + connect
-  if(ip){
-    document.getElementById("ipInput").value = ip;
-    connectWS();
-  }
-}
+            // Get TX Characteristic for notifications
+            const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_TX);
 
-// ===== CONNECT =====
-function connectWS(){
+            // Start receiving stream notifications
+            await characteristic.startNotifications();
+            characteristic.addEventListener('characteristicvaluechanged', handleData);
 
-  let ip = document.getElementById("ipInput").value;
+            statusText.textContent = "Status: Connected";
+            statusText.style.color = "#28a745";
+            connectBtn.disabled = true;
 
-  if(!ip){
-    alert("Enter ESP IP");
-    return;
-  }
+        } catch (error) {
+            console.log("Error: " + error);
+            statusText.textContent = "Status: Connection Failed";
+            statusText.style.color = "#dc3545";
+            connectBtn.disabled = false;
+        }
+    }
 
-  // Save IP
-  localStorage.setItem("esp_ip", ip);
+    // Parse the incoming streaming data array back to a string
+    function handleData(event) {
+        const value = event.target.value;
+        let decoder = new TextDecoder('utf-8');
+        let strValue = decoder.decode(value);
+        
+        document.getElementById('adcValue').textContent = strValue;
+    }
 
-  // Close old
-  if(ws){
-    ws.close();
-  }
-
-  ws = new WebSocket("ws://" + ip + "/ws");
-
-  ws.onopen = ()=>{
-    document.getElementById("status").innerText = "Connected";
-    document.getElementById("status").style.color = "green";
-    console.log("Connected to", ip);
-  };
-
-  ws.onclose = ()=>{
-    document.getElementById("status").innerText = "Disconnected";
-    document.getElementById("status").style.color = "red";
-
-    // Auto reconnect
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connectWS, 2000);
-  };
-}
-
-// ===== SEND SERVO =====
-function sendVal(el){
-
-  let val = el.value;
-  document.getElementById("v"+el.id[1]).innerText = val;
-
-  let cmd = el.id.toLowerCase() + val.toString().padStart(3,'0');
-  lastCmd = cmd;
-
-  if(ws && ws.readyState === WebSocket.OPEN){
-    ws.send(cmd);
-  }
-}
-
-// ===== SEND SPEED =====
-function sendSpeed(el){
-
-  let val = el.value;
-  document.getElementById("vs").innerText = val;
-
-  if(ws && ws.readyState === WebSocket.OPEN){
-    ws.send("spd" + val.toString().padStart(3,'0'));
-  }
-}
-
-// ===== START =====
-window.onload = init;
-
+    function onDisconnected() {
+        document.getElementById('statusText').textContent = "Status: Disconnected";
+        document.getElementById('statusText').style.color = "#666";
+        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('adcValue').textContent = "0000";
+    }
 </script>
 
 </body>
